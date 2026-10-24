@@ -3,198 +3,272 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>長者防騙 AI 助手</title>
+    <title>「話」險爲夷 ——幫你識別你的家人</title>
+    <!-- Tailwind CSS for styling -->
     <script src="https://cdn.tailwindcss.com"></script>
-    <!-- TensorFlow.js -->
+    
+    <!-- TensorFlow.js (Required for both Image and Audio models) -->
     <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@1.3.1/dist/tf.min.js"></script>
-    <!-- Teachable Machine Image Model -->
+    
+    <!-- Teachable Machine Image Model Library -->
     <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
-    <!-- Teachable Machine Audio Model -->
-    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/audio@0.1/dist/teachablemachine-audio.min.js"></script>
+    
+    <!-- Teachable Machine Audio Model Library (Speech Commands) -->
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/speech-commands@0.4.0/dist/speech-commands.min.js"></script>
 
     <style>
-        body { font-family: 'Inter', 'Noto Sans TC', sans-serif; background-color: #f0fdf4; }
+        body { 
+            font-family: 'Inter', 'Noto Sans TC', sans-serif; 
+            background-color: #fdfdfd; 
+            touch-action: manipulation; /* 增強觸控體驗 */
+        }
         .hidden { display: none !important; }
-        .btn-large {
-            transition: all 0.2s;
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        
+        /* 巨大按鈕的點擊回饋 */
+        .btn-massive {
+            transition: transform 0.1s ease-in-out, box-shadow 0.1s ease-in-out;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
         }
-        .btn-large:active {
-            transform: scale(0.95);
+        .btn-massive:active {
+            transform: scale(0.96);
+            box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);
         }
+
         #webcam-container canvas {
             width: 100%;
-            max-width: 400px;
+            max-width: 480px;
             border-radius: 1rem;
             margin: 0 auto;
-            border: 4px solid #16a34a;
+            border: 6px solid #4B5563; /* 灰色粗邊框讓長者容易辨識範圍 */
+            background-color: #000;
+        }
+
+        /* 脈衝動畫 - 用於提示正在錄音 */
+        @keyframes pulse-ring {
+            0% { transform: scale(0.8); opacity: 0.5; }
+            100% { transform: scale(1.3); opacity: 0; }
+        }
+        .listening-animation {
+            position: relative;
+        }
+        .listening-animation::before {
+            content: '';
+            position: absolute;
+            left: -20px; top: -20px; right: -20px; bottom: -20px;
+            border-radius: 50%;
+            border: 8px solid #8B5CF6;
+            animation: pulse-ring 1.5s cubic-bezier(0.215, 0.61, 0.355, 1) infinite;
         }
     </style>
 </head>
-<body class="min-h-screen text-gray-800 flex flex-col items-center justify-center p-4">
+<body class="min-h-screen text-gray-900 flex flex-col items-center justify-start pt-8 pb-8 px-4">
 
-    <!-- 首頁 -->
-    <div id="home-screen" class="w-full max-w-2xl text-center space-y-8">
-        <h1 class="text-4xl md:text-5xl font-bold text-green-800 mb-8">「話」險爲夷 ——幫你識別你的家人</h1>
-        <p class="text-2xl text-gray-700 mb-8">請選擇您要驗證的方式：</p>
+    <!-- 全局標題 -->
+    <h1 class="text-4xl md:text-5xl lg:text-6xl font-extrabold text-blue-900 mb-10 text-center tracking-wide drop-shadow-sm">
+        「話」險爲夷 <br class="md:hidden" /> ——幫你識別你的家人
+    </h1>
+
+    <!-- 錯誤提示區塊 (代替 alert) -->
+    <div id="error-message" class="hidden w-full max-w-3xl bg-red-600 text-white text-3xl font-bold p-6 rounded-3xl mb-8 text-center shadow-lg">
+        發生錯誤
+    </div>
+
+    <!-- 首頁 (功能選擇) -->
+    <div id="home-view" class="w-full max-w-4xl text-center space-y-12 flex-grow flex flex-col justify-center pb-20">
+        <p class="text-4xl text-gray-700 font-bold mb-8">請選擇驗證方式：</p>
         
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <button onclick="showScreen('image-screen')" class="btn-large bg-blue-500 hover:bg-blue-600 text-white rounded-3xl p-12 flex flex-col items-center justify-center space-y-4">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-24 w-24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-8 md:gap-12">
+            <!-- 相片識別按鈕 -->
+            <button onclick="showView('image-view'); startImageModel();" class="btn-massive bg-blue-600 text-white rounded-[3rem] p-16 flex flex-col items-center justify-center space-y-6">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-32 w-32" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 9a2 2 0 012-2h.93a2 2 0 001.664-.89l.812-1.22A2 2 0 0110.07 4h3.86a2 2 0 011.664.89l.812 1.22A2 2 0 0018.07 7H19a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V9z" />
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 13a3 3 0 11-6 0 3 3 0 016 0z" />
                 </svg>
-                <span class="text-4xl font-bold">相片驗證</span>
+                <span class="text-6xl font-extrabold">相片識別</span>
             </button>
 
-            <button onclick="showScreen('audio-screen')" class="btn-large bg-purple-500 hover:bg-purple-600 text-white rounded-3xl p-12 flex flex-col items-center justify-center space-y-4">
-                <svg xmlns="http://www.w3.org/2000/svg" class="h-24 w-24" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <!-- 聲音識別按鈕 -->
+            <button onclick="showView('audio-view'); startAudioModel();" class="btn-massive bg-purple-600 text-white rounded-[3rem] p-16 flex flex-col items-center justify-center space-y-6">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-32 w-32" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
                 </svg>
-                <span class="text-4xl font-bold">聲音驗證</span>
+                <span class="text-6xl font-extrabold">聲音識別</span>
             </button>
         </div>
     </div>
 
     <!-- 相片識別頁面 -->
-    <div id="image-screen" class="hidden w-full max-w-2xl text-center space-y-6">
-        <div class="flex justify-between items-center mb-4">
-            <button onclick="goHome()" class="text-xl bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-3 rounded-2xl font-bold">返回首頁</button>
-            <h2 class="text-3xl font-bold text-blue-700">相片驗證</h2>
-            <div class="w-24"></div> <!-- 佔位用以保持標題置中 -->
+    <div id="image-view" class="hidden w-full max-w-4xl text-center space-y-8 flex-grow flex flex-col">
+        <div id="image-loading" class="text-5xl font-bold text-blue-600 py-10 animate-pulse">
+            鏡頭載入中，請稍候...
         </div>
 
-        <div id="webcam-container" class="bg-gray-200 rounded-2xl min-h-[300px] flex items-center justify-center overflow-hidden relative shadow-inner">
-            <span id="cam-placeholder" class="text-2xl text-gray-500">請按下「開啟鏡頭」按鈕</span>
+        <div id="webcam-container" class="min-h-[400px] flex items-center justify-center">
+            <!-- Canvas 會在此處生成 -->
         </div>
 
-        <button id="start-cam-btn" onclick="startImageModel()" class="w-full btn-large bg-blue-600 hover:bg-blue-700 text-white text-3xl font-bold py-6 rounded-2xl">
-            開啟鏡頭
-        </button>
+        <!-- 結果顯示區域 (大字體、高對比) -->
+        <div id="image-result" class="text-5xl md:text-6xl font-extrabold p-10 rounded-3xl min-h-[160px] flex items-center justify-center border-8 border-gray-200 bg-gray-100 text-gray-500 shadow-xl transition-colors duration-300">
+            請將臉部對準鏡頭
+        </div>
 
-        <div id="image-result" class="text-4xl md:text-5xl font-bold p-8 rounded-2xl bg-white shadow-md border-4 border-gray-100 min-h-[120px] flex items-center justify-center">
-            等待驗證中...
+        <div class="mt-auto pt-8">
+            <button onclick="goHome()" class="btn-massive w-full bg-gray-600 hover:bg-gray-700 text-white text-5xl font-extrabold py-8 rounded-[2rem]">
+                返回上一頁
+            </button>
         </div>
     </div>
 
     <!-- 聲音識別頁面 -->
-    <div id="audio-screen" class="hidden w-full max-w-2xl text-center space-y-6">
-        <div class="flex justify-between items-center mb-4">
-            <button onclick="goHome()" class="text-xl bg-gray-300 hover:bg-gray-400 text-gray-800 px-6 py-3 rounded-2xl font-bold">返回首頁</button>
-            <h2 class="text-3xl font-bold text-purple-700">聲音驗證</h2>
-            <div class="w-24"></div> <!-- 佔位用 -->
+    <div id="audio-view" class="hidden w-full max-w-4xl text-center space-y-8 flex-grow flex flex-col">
+        <div id="audio-loading" class="text-5xl font-bold text-purple-600 py-10 animate-pulse">
+            麥克風載入中，請稍候...
         </div>
 
-        <div class="bg-purple-100 rounded-2xl p-8 shadow-inner flex flex-col items-center justify-center">
-            <svg id="audio-wave" xmlns="http://www.w3.org/2000/svg" class="h-32 w-32 text-purple-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" />
-            </svg>
-            <p class="text-2xl text-purple-800 font-bold">請對著麥克風說話</p>
+        <div id="audio-listening-ui" class="hidden flex-col items-center justify-center py-16 space-y-10 bg-purple-50 rounded-3xl border-4 border-purple-200">
+            <div class="listening-animation rounded-full bg-purple-600 p-8 shadow-xl">
+                <svg xmlns="http://www.w3.org/2000/svg" class="h-24 w-24 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                </svg>
+            </div>
+            <p class="text-5xl font-bold text-purple-900">正在聆聽您的聲音...</p>
         </div>
 
-        <button id="start-audio-btn" onclick="startAudioModel()" class="w-full btn-large bg-purple-600 hover:bg-purple-700 text-white text-3xl font-bold py-6 rounded-2xl">
-            開始錄音
-        </button>
+        <!-- 結果顯示區域 -->
+        <div id="audio-result" class="text-5xl md:text-6xl font-extrabold p-10 rounded-3xl min-h-[160px] flex items-center justify-center border-8 border-gray-200 bg-gray-100 text-gray-500 shadow-xl transition-colors duration-300">
+            等待說話聲音
+        </div>
 
-        <div id="audio-result" class="text-4xl md:text-5xl font-bold p-8 rounded-2xl bg-white shadow-md border-4 border-gray-100 min-h-[120px] flex items-center justify-center">
-            等待驗證中...
+        <div class="mt-auto pt-8">
+            <button onclick="goHome()" class="btn-massive w-full bg-gray-600 hover:bg-gray-700 text-white text-5xl font-extrabold py-8 rounded-[2rem]">
+                返回上一頁
+            </button>
         </div>
     </div>
 
+    <!-- JavaScript 邏輯 -->
     <script>
-        // 模型 URL
+        // 模型 URL 配置
         const URL_IMAGE = "https://teachablemachine.withgoogle.com/models/bt7bqn3hM/";
         const URL_AUDIO = "https://teachablemachine.withgoogle.com/models/ifLR0ETIo/";
 
-        let imageModel, webcam, maxImagePredictions;
-        let audioModel;
+        // 狀態與實例變數
+        let imageModel = null;
+        let webcam = null;
+        let maxImagePredictions = 0;
         let isWebcamRunning = false;
-        let isAudioRunning = false;
 
-        // 頁面切換控制
-        function showScreen(screenId) {
-            document.getElementById('home-screen').classList.add('hidden');
-            document.getElementById('image-screen').classList.add('hidden');
-            document.getElementById('audio-screen').classList.add('hidden');
-            document.getElementById(screenId).classList.remove('hidden');
+        let audioRecognizer = null;
+        let isAudioListening = false;
+
+        // 顯示錯誤訊息的工具函數
+        function showError(message) {
+            const errDiv = document.getElementById('error-message');
+            errDiv.innerText = message;
+            errDiv.classList.remove('hidden');
+            setTimeout(() => { errDiv.classList.add('hidden'); }, 5000);
         }
 
+        // 切換畫面
+        function showView(viewId) {
+            document.getElementById('home-view').classList.add('hidden');
+            document.getElementById('image-view').classList.add('hidden');
+            document.getElementById('audio-view').classList.add('hidden');
+            document.getElementById(viewId).classList.remove('hidden');
+            document.getElementById('error-message').classList.add('hidden');
+        }
+
+        // 返回首頁並徹底清理資源
         async function goHome() {
-            showScreen('home-screen');
-            await stopAll();
+            showView('home-view');
+            await stopAllResources();
         }
 
-        async function stopAll() {
+        // 徹底停止鏡頭與麥克風
+        async function stopAllResources() {
             // 停止相片鏡頭
             if (webcam && isWebcamRunning) {
-                webcam.stop();
                 isWebcamRunning = false;
-                document.getElementById("webcam-container").innerHTML = '<span id="cam-placeholder" class="text-2xl text-gray-500">請按下「開啟鏡頭」按鈕</span>';
-                document.getElementById('start-cam-btn').classList.remove('hidden');
-                document.getElementById('image-result').innerHTML = "等待驗證中...";
-                document.getElementById('image-result').className = "text-4xl md:text-5xl font-bold p-8 rounded-2xl bg-white shadow-md border-4 border-gray-100 min-h-[120px] flex items-center justify-center";
+                await webcam.stop();
+                document.getElementById("webcam-container").innerHTML = '';
             }
             // 停止聲音監聽
-            if (audioModel && isAudioRunning) {
-                audioModel.stopListening();
-                isAudioRunning = false;
-                document.getElementById('start-audio-btn').classList.remove('hidden');
-                document.getElementById('audio-wave').classList.replace('text-purple-600', 'text-purple-300');
-                document.getElementById('audio-wave').classList.remove('animate-pulse');
-                document.getElementById('audio-result').innerHTML = "等待驗證中...";
-                document.getElementById('audio-result').className = "text-4xl md:text-5xl font-bold p-8 rounded-2xl bg-white shadow-md border-4 border-gray-100 min-h-[120px] flex items-center justify-center";
+            if (audioRecognizer && audioRecognizer.isListening()) {
+                await audioRecognizer.stopListening();
+                isAudioListening = false;
             }
+            
+            // 重置 UI 狀態
+            resetUI();
         }
 
-        // --- 相片識別邏輯 ---
+        function resetUI() {
+            // 重置相片 UI
+            document.getElementById('image-loading').classList.remove('hidden');
+            let imgRes = document.getElementById('image-result');
+            imgRes.innerText = "請將臉部對準鏡頭";
+            imgRes.className = "text-5xl md:text-6xl font-extrabold p-10 rounded-3xl min-h-[160px] flex items-center justify-center border-8 border-gray-200 bg-gray-100 text-gray-500 shadow-xl transition-colors duration-300";
+
+            // 重置聲音 UI
+            document.getElementById('audio-loading').classList.remove('hidden');
+            document.getElementById('audio-listening-ui').classList.add('hidden');
+            let audRes = document.getElementById('audio-result');
+            audRes.innerText = "等待說話聲音";
+            audRes.className = "text-5xl md:text-6xl font-extrabold p-10 rounded-3xl min-h-[160px] flex items-center justify-center border-8 border-gray-200 bg-gray-100 text-gray-500 shadow-xl transition-colors duration-300";
+        }
+
+
+        // ==========================================
+        // 相片識別邏輯 (Teachable Machine Image)
+        // ==========================================
         async function startImageModel() {
             try {
-                document.getElementById('start-cam-btn').classList.add('hidden');
-                document.getElementById('cam-placeholder').innerText = "載入中，請稍候...";
-                
-                const modelURL = URL_IMAGE + "model.json";
-                const metadataURL = URL_IMAGE + "metadata.json";
-
-                if(!imageModel) {
+                // 1. 載入模型 (如果尚未載入)
+                if (!imageModel) {
+                    const modelURL = URL_IMAGE + "model.json";
+                    const metadataURL = URL_IMAGE + "metadata.json";
                     imageModel = await tmImage.load(modelURL, metadataURL);
                     maxImagePredictions = imageModel.getTotalClasses();
                 }
 
-                // 設置並開啟鏡頭
+                // 2. 設置 WebCam
                 const flip = true; 
                 webcam = new tmImage.Webcam(400, 400, flip); 
-                await webcam.setup(); 
+                await webcam.setup(); // 請求權限
                 await webcam.play();
                 isWebcamRunning = true;
                 
+                // 3. 隱藏載入文字，顯示 Canvas
+                document.getElementById('image-loading').classList.add('hidden');
+                document.getElementById("webcam-container").innerHTML = '';
+                document.getElementById("webcam-container").appendChild(webcam.canvas);
+
+                // 4. 開始預測迴圈
                 window.requestAnimationFrame(imageLoop);
 
-                const wcContainer = document.getElementById("webcam-container");
-                wcContainer.innerHTML = '';
-                wcContainer.appendChild(webcam.canvas);
-
-            } catch (e) {
-                console.error(e);
-                alert("無法開啟鏡頭，請檢查權限設置。");
-                document.getElementById('start-cam-btn').classList.remove('hidden');
+            } catch (error) {
+                console.error("相片模型載入失敗: ", error);
+                showError("無法開啟相機，請確定您已允許網頁使用相機功能。");
+                goHome();
             }
         }
 
         async function imageLoop() {
-            if(isWebcamRunning) {
-                webcam.update();
+            if (isWebcamRunning) {
+                webcam.update(); // 更新畫面
                 await predictImage();
                 window.requestAnimationFrame(imageLoop);
             }
         }
 
         async function predictImage() {
-            if(!imageModel || !webcam) return;
+            if (!imageModel || !webcam) return;
             const predictions = await imageModel.predict(webcam.canvas);
             
             let highestProb = 0;
             let bestClass = "";
 
+            // 尋找最高機率的分類
             for (let i = 0; i < maxImagePredictions; i++) {
                 if(predictions[i].probability > highestProb) {
                     highestProb = predictions[i].probability;
@@ -202,58 +276,46 @@
                 }
             }
 
-            const resultDiv = document.getElementById("image-result");
-            
-            // 判斷邏輯
-            if (bestClass === "背景" || bestClass === "Background") {
-                resultDiv.innerHTML = "這可能不是你的家人";
-                resultDiv.className = "text-4xl md:text-5xl font-bold p-8 rounded-2xl bg-red-100 text-red-700 shadow-md border-4 border-red-500 min-h-[120px] flex items-center justify-center";
-            } else if (highestProb >= 0.80) {
-                resultDiv.innerHTML = "這是你的家人";
-                resultDiv.className = "text-4xl md:text-5xl font-bold p-8 rounded-2xl bg-green-100 text-green-700 shadow-md border-4 border-green-500 min-h-[120px] flex items-center justify-center";
-            } else {
-                resultDiv.innerHTML = "這可能不是你的家人";
-                resultDiv.className = "text-4xl md:text-5xl font-bold p-8 rounded-2xl bg-red-100 text-red-700 shadow-md border-4 border-red-500 min-h-[120px] flex items-center justify-center";
-            }
+            updateResultUI("image-result", highestProb, bestClass);
         }
 
-        // --- 聲音識別邏輯 ---
-        async function buildAudioModel() {
-            const checkpointURL = URL_AUDIO + "model.json";
-            const metadataURL = URL_AUDIO + "metadata.json";
 
-            const recognizer = speechCommands.create(
-                "BROWSER_FFT", // fourier transform type
-                undefined, // vocabulary feature, not used here
-                checkpointURL,
-                metadataURL);
-
-            await recognizer.ensureModelLoaded();
-            return recognizer;
-        }
-
+        // ==========================================
+        // 聲音識別邏輯 (Teachable Machine Audio)
+        // ==========================================
         async function startAudioModel() {
             try {
-                document.getElementById('start-audio-btn').classList.add('hidden');
-                document.getElementById('audio-result').innerHTML = "正在載入模型...";
-                
-                if(!audioModel) {
-                    audioModel = await buildAudioModel();
+                // 1. 載入模型 (如果尚未載入)
+                if (!audioRecognizer) {
+                    const checkpointURL = URL_AUDIO + "model.json";
+                    const metadataURL = URL_AUDIO + "metadata.json";
+                    
+                    audioRecognizer = speechCommands.create(
+                        "BROWSER_FFT", 
+                        undefined, 
+                        checkpointURL, 
+                        metadataURL
+                    );
+                    await audioRecognizer.ensureModelLoaded();
                 }
 
-                isAudioRunning = true;
-                const classLabels = audioModel.wordLabels();
-                
-                // 動畫效果
-                document.getElementById('audio-wave').classList.replace('text-purple-300', 'text-purple-600');
-                document.getElementById('audio-wave').classList.add('animate-pulse');
-                document.getElementById('audio-result').innerHTML = "正在聆聽...";
+                // 2. 開始聆聽
+                document.getElementById('audio-loading').classList.add('hidden');
+                document.getElementById('audio-listening-ui').classList.remove('hidden');
+                document.getElementById('audio-listening-ui').classList.add('flex');
 
-                audioModel.listen(result => {
+                if (audioRecognizer.isListening()) {
+                    await audioRecognizer.stopListening();
+                }
+
+                audioRecognizer.listen(result => {
                     const scores = result.scores; 
+                    const classLabels = audioRecognizer.wordLabels();
+                    
                     let highestProb = 0;
                     let bestClass = "";
 
+                    // 尋找最高機率的聲音分類
                     for (let i = 0; i < classLabels.length; i++) {
                         if (scores[i] > highestProb) {
                             highestProb = scores[i];
@@ -261,30 +323,45 @@
                         }
                     }
 
-                    const resultDiv = document.getElementById("audio-result");
-
-                    // 判斷邏輯: 背景噪音或低於80%都視為不是家人
-                    if (bestClass === "Background Noise" || bestClass === "背景噪音" || highestProb < 0.80) {
-                        resultDiv.innerHTML = "這可能不是你的家人";
-                        resultDiv.className = "text-4xl md:text-5xl font-bold p-8 rounded-2xl bg-red-100 text-red-700 shadow-md border-4 border-red-500 min-h-[120px] flex items-center justify-center";
-                    } else if (highestProb >= 0.80) {
-                        resultDiv.innerHTML = "這是你的家人";
-                        resultDiv.className = "text-4xl md:text-5xl font-bold p-8 rounded-2xl bg-green-100 text-green-700 shadow-md border-4 border-green-500 min-h-[120px] flex items-center justify-center";
-                    }
-
+                    updateResultUI("audio-result", highestProb, bestClass);
                 }, {
                     includeSpectrogram: true,
-                    probabilityThreshold: 0.50,
+                    probabilityThreshold: 0.50, // 降低回調門檻，在 updateResultUI 中再進行 0.8 判斷
                     invokeCallbackOnNoiseAndUnknown: true,
                     overlapFactor: 0.50
                 });
 
-            } catch (e) {
-                console.error(e);
-                alert("無法存取麥克風，請檢查權限設置。");
-                document.getElementById('start-audio-btn').classList.remove('hidden');
+                isAudioListening = true;
+
+            } catch (error) {
+                console.error("聲音模型載入失敗: ", error);
+                showError("無法開啟麥克風，請確定您已允許網頁使用麥克風功能。");
+                goHome();
             }
         }
+
+
+        // ==========================================
+        // 共用 UI 更新邏輯
+        // ==========================================
+        function updateResultUI(elementId, highestProb, bestClass) {
+            const resultElement = document.getElementById(elementId);
+            const bgKeywords = ["背景", "Background", "Background Noise", "_background_noise_"];
+            const isBackground = bgKeywords.includes(bestClass);
+
+            // 判斷邏輯：大於等於 80% 且不是背景
+            if (highestProb >= 0.80 && !isBackground) {
+                // 顯示：這是你的家人 (綠色)
+                resultElement.innerText = "這是你的家人";
+                resultElement.className = "text-5xl md:text-7xl font-extrabold p-10 rounded-3xl min-h-[160px] flex items-center justify-center border-8 border-green-600 bg-green-500 text-white shadow-2xl transition-colors duration-300";
+            } else {
+                // 顯示：這可能不是你的家人 (紅色)
+                // 包含機率小於 80% 或是偵測到背景的情況
+                resultElement.innerText = "這可能不是你的家人";
+                resultElement.className = "text-5xl md:text-7xl font-extrabold p-10 rounded-3xl min-h-[160px] flex items-center justify-center border-8 border-red-700 bg-red-600 text-white shadow-2xl transition-colors duration-300";
+            }
+        }
+
     </script>
 </body>
 </html>
